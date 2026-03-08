@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+  <title>아기 하루 일정 계산기</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet"/>
+  <style>
+    *{box-sizing:border-box;min-width:0;}
+    body{margin:0;padding:0;font-family:'Noto Sans KR',sans-serif;}
+    input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:white;border:2.5px solid currentColor;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.18);}
+    input[type=time],input[type=date],input[type=number]{display:block;width:100% !important;max-width:100% !important;min-width:0 !important;border:2px solid #FFD0B5;border-radius:10px;padding:6px 8px;font-size:13px;font-family:'Noto Sans KR',sans-serif;background:white;outline:none;color:#37474F;-webkit-appearance:none;appearance:none;}
+    input[type=time]::-webkit-date-and-time-value{text-align:left;min-width:0;width:100%;}
+    input[type=time]::-webkit-inner-spin-button{display:none;}
+    input[type=time]:focus,input[type=date]:focus,input[type=number]:focus{border-color:#9575CD;}
+    textarea{display:block;width:100%;min-width:0;border:2px solid #E1BEE7;border-radius:10px;padding:9px 12px;font-size:13px;font-family:'Noto Sans KR',sans-serif;background:white;outline:none;color:#37474F;resize:none;}
+    textarea:focus{border-color:#9575CD;}
+    .card{background:rgba(255,255,255,0.9);backdrop-filter:blur(12px);border-radius:18px;padding:16px;margin-bottom:12px;box-shadow:0 3px 16px rgba(149,117,205,0.1);animation:fadeUp 0.35s ease forwards;overflow:hidden;width:100%;max-width:100%;}
+    .wish-row{padding:10px 12px;border-radius:12px;border:1.5px solid;transition:all 0.15s;overflow:hidden;width:100%;max-width:100%;}
+    @keyframes slideIn{from{opacity:0;transform:translateX(-8px);}to{opacity:1;transform:translateX(0);}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+    @keyframes pop{0%{transform:scale(0.95);}60%{transform:scale(1.03);}100%{transform:scale(1);}}
+    @keyframes floatUp{0%{opacity:0;transform:translateY(30px);}100%{opacity:1;transform:translateY(0);}}
+    @keyframes heartbeat{0%,100%{transform:scale(1);}50%{transform:scale(1.18);}}
+    @keyframes shimmer{0%,100%{opacity:0.7;}50%{opacity:1;}}
+    .intro-btn{background:linear-gradient(135deg,#FF8A65,#E91E63);color:white;border:none;border-radius:16px;padding:14px 0;font-size:16px;font-weight:900;cursor:pointer;font-family:inherit;box-shadow:0 6px 20px rgba(233,30,99,0.35);width:100%;transition:transform 0.15s;}
+    .intro-btn:active{transform:scale(0.97);}
+    .intro-input{display:block;width:100%;border:none;border-bottom:3px solid #F48FB1;border-radius:0;padding:12px 4px;font-size:24px;font-weight:900;font-family:inherit;background:transparent;outline:none;color:#4A148C;text-align:center;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useCallback,useEffect}=React;
+
+const WAKE_WINDOWS={
+  0:{label:"0개월",min:45,max:60},
+  1:{label:"1개월",min:45,max:60},
+  2:{label:"2개월",min:60,max:90},
+  3:{label:"3개월",min:75,max:105},
+  4:{label:"4개월",min:90,max:120},
+  5:{label:"5개월",min:105,max:135},
+  6:{label:"6개월",min:120,max:150},
+  7:{label:"7개월",min:150,max:210,naps:2},
+  8:{label:"8개월",min:150,max:210,naps:2},
+  9:{label:"9개월",min:180,max:210,naps:2},
+  10:{label:"10개월",min:180,max:240,naps:2},
+};
+const BURP=15;
+
+function toMin(t){const[h,m]=t.split(":").map(Number);return h*60+m;}
+function fromMin(m){const hh=Math.floor(((m%1440)+1440)%1440/60);const mm=((m%60)+60)%60;return`${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}`;}
+function addMin(t,m){return fromMin(toMin(t)+m);}
+function diffMin(t1,t2){return toMin(t2)-toMin(t1);}
+function fmt(t){if(!t)return"";const[h,m]=t.split(":").map(Number);const p=h<12?"오전":"오후";const dh=h===0?12:h>12?h-12:h;return`${p} ${dh}:${String(m).padStart(2,"0")}`;}
+function todayStr(){const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
+function fmtDate(s){const[y,mo,d]=s.split("-");return`${y}년 ${Number(mo)}월 ${Number(d)}일`;}
+function fmtDateShort(s){const[,mo,d]=s.split("-");return`${Number(mo)}.${Number(d)}`;}
+
+// localStorage 헬퍼 (window.storage 대신)
+const store={
+  get:(k)=>{try{const v=localStorage.getItem(k);return v?{value:v}:null;}catch{return null;}},
+  set:(k,v)=>{try{localStorage.setItem(k,v);}catch{}},
+};
+
+const TC={
+  wake:{bg:"#FFF8E1",border:"#FFD54F",icon:"☀️",label:"기상"},
+  feed:{bg:"#E8F5E9",border:"#66BB6A",icon:"🍼",label:"수유"},
+  burp:{bg:"#FFF3E0",border:"#FFA726",icon:"🤲",label:"트림·세워안기"},
+  play:{bg:"#E3F2FD",border:"#42A5F5",icon:"🧸",label:"놀이"},
+  sleepPre:{bg:"#F3E5F5",border:"#CE93D8",icon:"💤",label:"수면 준비"},
+  sleep:{bg:"#EDE7F6",border:"#9575CD",icon:"😴",label:"낮잠"},
+  night:{bg:"#E8EAF6",border:"#5C6BC0",icon:"🌙",label:"야간 취침"},
+  bath:{bg:"#E0F7FA",border:"#26C6DA",icon:"🛁",label:"목욕"},
+};
+
+function MiniSlider({value,min,max,step=5,onChange,color}){
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:"6px",marginTop:"4px"}}>
+      <button onClick={()=>onChange(Math.max(min,value-step))} style={{width:"22px",height:"22px",borderRadius:"50%",border:`1.5px solid ${color}`,background:"white",color,fontWeight:"700",fontSize:"14px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0}}>−</button>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(Number(e.target.value))}
+        style={{flex:1,minWidth:0,height:"4px",borderRadius:"2px",outline:"none",cursor:"pointer",WebkitAppearance:"none",appearance:"none",border:"none",
+          background:`linear-gradient(to right,${color} ${((value-min)/(max-min))*100}%,#E0E0E0 0%)`}}/>
+      <button onClick={()=>onChange(Math.min(max,value+step))} style={{width:"22px",height:"22px",borderRadius:"50%",border:`1.5px solid ${color}`,background:"white",color,fontWeight:"700",fontSize:"14px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0}}>+</button>
+      <span style={{fontSize:"12px",fontWeight:"700",color,minWidth:"34px",textAlign:"right"}}>{value}분</span>
+    </div>
+  );
+}
+
+function TimePicker({value,onChange,color,label}){
+  return(
+    <div style={{marginTop:"6px"}}>
+      {label&&<div style={{fontSize:"11px",color:"#546E7A",marginBottom:"4px",fontWeight:"600"}}>{label}</div>}
+      <div style={{display:"flex",alignItems:"center",gap:"4px",flexWrap:"wrap"}}>
+        {[-15,-10,-5].map(d=>(
+          <button key={d} onClick={()=>onChange(addMin(value,d))} style={{padding:"3px 5px",borderRadius:"7px",border:`1.5px solid ${color}`,background:"white",color,fontSize:"10px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>{d}</button>
+        ))}
+        <div style={{flex:1,minWidth:"80px",textAlign:"center",fontSize:"13px",fontWeight:"900",color,background:`${color}18`,borderRadius:"8px",padding:"4px 0"}}>{fmt(value)}</div>
+        {[5,10,15].map(d=>(
+          <button key={d} onClick={()=>onChange(addMin(value,d))} style={{padding:"3px 5px",borderRadius:"7px",border:`1.5px solid ${color}`,background:"white",color,fontSize:"10px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>+{d}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TimeBlock({item,index,isLast,onFeedChange,onNapStartChange,onNapDurChange,onFeedAmountChange,feedAmounts}){
+  const c=TC[item.type]||TC.feed;
+  const[open,setOpen]=useState(false);
+  const canEdit=item.type==="feed"||item.type==="sleep";
+  const amt=item.type==="feed"&&feedAmounts?feedAmounts[item.feedIdx]:null;
+  return(
+    <div style={{display:"flex",alignItems:"stretch",marginBottom:"5px",animation:`slideIn 0.25s ease forwards`,animationDelay:`${Math.min(index*0.028,0.45)}s`,opacity:0}}>
+      <div style={{width:"72px",minWidth:"72px",display:"flex",flexDirection:"column",alignItems:"flex-end",justifyContent:"flex-start",paddingRight:"8px",paddingTop:"7px"}}>
+        <span style={{fontSize:"11px",fontWeight:"700",color:"#37474F"}}>{fmt(item.time)}</span>
+        {item.duration&&<span style={{fontSize:"10px",color:"#90A4AE",marginTop:"1px"}}>{item.duration}분</span>}
+      </div>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginRight:"8px"}}>
+        <div style={{width:"28px",height:"28px",borderRadius:"50%",background:c.bg,border:`2px solid ${c.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",flexShrink:0,boxShadow:`0 2px 5px ${c.border}40`}}>{c.icon}</div>
+        {!isLast&&<div style={{width:"2px",flex:1,background:`${c.border}28`,marginTop:"2px",minHeight:"6px"}}/>}
+      </div>
+      <div style={{flex:1,minWidth:0,marginBottom:"2px"}}>
+        <div onClick={()=>canEdit&&setOpen(o=>!o)}
+          style={{background:item.pinned?"#FFF0F5":c.bg,border:`1.5px solid ${open?c.border:item.pinned?"#F06292":c.border+"50"}`,borderRadius:"10px",padding:"6px 10px",cursor:canEdit?"pointer":"default",overflow:"hidden"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"4px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"4px",minWidth:0,flex:1}}>
+              <span style={{fontSize:"11px",fontWeight:"700",color:"#263238",flexShrink:0}}>{c.label}{item.napNum&&<span style={{color:c.border,marginLeft:"4px"}}>{item.napNum}번째 낮잠</span>}</span>
+              {item.pinned&&<span style={{fontSize:"9px",background:"#FCE4EC",color:"#E91E63",borderRadius:"5px",padding:"1px 4px",fontWeight:"700",flexShrink:0}}>📌</span>}
+              {item.type==="feed"&&amt!=null&&amt>0&&(
+                <span style={{fontSize:"10px",background:"#E8F5E9",color:"#2E7D32",borderRadius:"5px",padding:"1px 5px",fontWeight:"700",flexShrink:0}}>{amt}ml</span>
+              )}
+            </div>
+            {canEdit&&<span style={{fontSize:"10px",color:c.border,flexShrink:0}}>{open?"▲":"✏️"}</span>}
+          </div>
+          {item.note&&!open&&<div style={{fontSize:"10px",color:"#607D8B",marginTop:"1px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.note}</div>}
+          {open&&item.type==="feed"&&(
+            <div onClick={e=>e.stopPropagation()} style={{marginTop:"8px"}}>
+              <div style={{fontSize:"11px",color:"#546E7A",fontWeight:"600",marginBottom:"2px"}}>🍼 수유 시간</div>
+              <MiniSlider value={item.feedDur} min={10} max={40} step={5} onChange={v=>onFeedChange(item.feedIdx,v)} color="#66BB6A"/>
+              <div style={{marginTop:"10px"}}>
+                <div style={{fontSize:"11px",color:"#546E7A",fontWeight:"600",marginBottom:"4px"}}>💧 수유량 (ml)</div>
+                <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
+                  {[60,80,100,120,150].map(ml=>(
+                    <button key={ml} onClick={()=>onFeedAmountChange(item.feedIdx,ml)}
+                      style={{flex:1,minWidth:0,padding:"5px 0",borderRadius:"8px",border:`1.5px solid ${amt===ml?"#66BB6A":"#C8E6C9"}`,
+                        background:amt===ml?"#66BB6A":"white",color:amt===ml?"white":"#388E3C",
+                        fontSize:"10px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit"}}>{ml}</button>
+                  ))}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:"6px",marginTop:"6px"}}>
+                  <input type="number" min={0} max={300} value={amt||""} placeholder="직접입력"
+                    onChange={e=>onFeedAmountChange(item.feedIdx,Number(e.target.value)||0)}
+                    style={{flex:1,minWidth:0,border:"1.5px solid #C8E6C9",borderRadius:"8px",padding:"5px 8px",fontSize:"12px",fontFamily:"inherit",outline:"none",color:"#37474F"}}/>
+                  <span style={{fontSize:"11px",color:"#90A4AE",flexShrink:0}}>ml</span>
+                  {amt>0&&<button onClick={()=>onFeedAmountChange(item.feedIdx,0)}
+                    style={{fontSize:"10px",color:"#EF9A9A",background:"none",border:"1px solid #EF9A9A",borderRadius:"6px",padding:"3px 7px",cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>지우기</button>}
+                </div>
+              </div>
+            </div>
+          )}
+          {open&&item.type==="sleep"&&(
+            <div onClick={e=>e.stopPropagation()} style={{marginTop:"4px"}}>
+              <TimePicker value={item.time} onChange={t=>onNapStartChange(item.napNum,t)} color="#9575CD" label={`⏰ ${item.napNum}번 낮잠 시작 시간`}/>
+              <div style={{fontSize:"11px",color:"#546E7A",fontWeight:"600",marginTop:"7px"}}>{item.napNum==="3"?"😴 낮잠 길이 (30~45분 권장)":"😴 낮잠 길이"}</div>
+              <MiniSlider value={item.duration} min={item.napNum==="3"?20:40} max={item.napNum==="3"?60:130} step={5} onChange={v=>onNapDurChange(item.napNum,v)} color="#9575CD"/>
+              <div style={{marginTop:"5px",fontSize:"10px",color:"#9575CD",background:"#9575CD12",borderRadius:"6px",padding:"3px 7px"}}>종료: <strong>{fmt(addMin(item.time,item.duration))}</strong> → 이후 자동 재계산</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildSchedule(cfg){
+  const{wakeTime,feedDurs:F,napStarts,napDurs:ND,lastNapFixed,midWW,ww,bedtimeOffset=13,twoNapMode=false}=cfg;
+  const items=[];let fi=0;const push=o=>items.push(o);
+  const bedtime=addMin(wakeTime,bedtimeOffset*60);
+  const finalFeed=addMin(bedtime,-20);
+  const bathTime=addMin(finalFeed,-50);
+
+  push({time:wakeTime,type:"wake",note:"기상! 배고픔 신호 확인"});
+  push({time:wakeTime,type:"feed",duration:F[fi],feedIdx:fi,feedDur:F[fi],note:"아침 수유"});fi++;
+  push({time:addMin(wakeTime,F[0]),type:"burp",duration:BURP,note:"역류 방지! 세워 안아 트림 유지"});
+  const play1s=addMin(wakeTime,F[0]+BURP);
+  const nap1s=napStarts[1]||addMin(wakeTime,midWW);
+  const p1d=diffMin(play1s,nap1s);
+  if(p1d>5)push({time:play1s,type:"play",duration:p1d,note:`깨시 ${ww.min}~${ww.max}분 • 피곤 신호 관찰`});
+  push({time:addMin(nap1s,-5),type:"sleepPre",duration:5,note:"조명 어둡게, 수면 환경 조성"});
+  push({time:nap1s,type:"sleep",napNum:"1",duration:ND[1],pinned:!!napStarts[1],note:`종료: ${fmt(addMin(nap1s,ND[1]))}`});
+  const nap1e=addMin(nap1s,ND[1]);
+  push({time:nap1e,type:"wake",note:"1번 낮잠 기상"});
+  push({time:nap1e,type:"feed",duration:F[fi],feedIdx:fi,feedDur:F[fi],note:"수유"});fi++;
+  push({time:addMin(nap1e,F[1]),type:"burp",duration:BURP,note:"트림 & 세워안기"});
+  const play2s=addMin(nap1e,F[1]+BURP);
+  const nap2s=napStarts[2]||addMin(nap1e,midWW);
+  const p2d=diffMin(play2s,nap2s);
+  if(p2d>5)push({time:play2s,type:"play",duration:p2d,note:`깨시 ${ww.min}~${ww.max}분`});
+  push({time:addMin(nap2s,-5),type:"sleepPre",duration:5,note:"조명 어둡게"});
+  push({time:nap2s,type:"sleep",napNum:"2",duration:ND[2],pinned:!!napStarts[2],note:`종료: ${fmt(addMin(nap2s,ND[2]))}`});
+  const nap2e=addMin(nap2s,ND[2]);
+
+  if(!twoNapMode){
+    push({time:nap2e,type:"wake",note:"2번 낮잠 기상"});
+    push({time:nap2e,type:"feed",duration:F[fi],feedIdx:fi,feedDur:F[fi],note:"수유"});fi++;
+    push({time:addMin(nap2e,F[2]),type:"burp",duration:BURP,note:"트림 & 세워안기"});
+    const play3s=addMin(nap2e,F[2]+BURP);
+    const nap3s=napStarts[3]||lastNapFixed;
+    const p3d=diffMin(play3s,nap3s);
+    if(p3d>5)push({time:play3s,type:"play",duration:p3d,note:"마지막 낮잠 전 놀이"});
+    push({time:nap3s,type:"sleep",napNum:"3",duration:ND[3],pinned:!!napStarts[3],note:`고정 낮잠 • 종료: ${fmt(addMin(nap3s,ND[3]))}`});
+    const nap3e=addMin(nap3s,ND[3]);
+    push({time:nap3e,type:"wake",note:"3번 낮잠 기상"});
+    push({time:nap3e,type:"feed",duration:F[fi],feedIdx:fi,feedDur:F[fi],note:"수유"});fi++;
+    push({time:addMin(nap3e,F[3]),type:"burp",duration:BURP,note:"트림 & 세워안기"});
+    const eves=addMin(nap3e,F[3]+BURP);
+    const eved=diffMin(eves,bathTime);
+    if(eved>5)push({time:eves,type:"play",duration:eved,note:"저녁 놀이 (조용하게)"});
+    if(diffMin(nap3e,bathTime)>F[3]+BURP+5)push({time:bathTime,type:"bath",duration:10,note:"목욕 🛁 따뜻하게!"});
+    if(diffMin(nap3e,finalFeed)>F[3]+BURP+10){
+      push({time:finalFeed,type:"feed",duration:F[fi]||20,feedIdx:fi,feedDur:F[fi]||20,note:"취침 전 마지막 수유!"});
+      push({time:addMin(finalFeed,F[fi]||20),type:"burp",duration:BURP,note:"트림 후 취침 준비"});
+    }
+  }else{
+    push({time:nap2e,type:"wake",note:"2번 낮잠 기상"});
+    push({time:nap2e,type:"feed",duration:F[fi],feedIdx:fi,feedDur:F[fi],note:"수유"});fi++;
+    push({time:addMin(nap2e,F[2]),type:"burp",duration:BURP,note:"트림 & 세워안기"});
+    const eves2=addMin(nap2e,F[2]+BURP);
+    const eved2=diffMin(eves2,bathTime);
+    if(eved2>5)push({time:eves2,type:"play",duration:eved2,note:"저녁 놀이 (조용하게)"});
+    if(diffMin(nap2e,bathTime)>F[2]+BURP+5)push({time:bathTime,type:"bath",duration:10,note:"목욕 🛁 따뜻하게!"});
+    if(diffMin(nap2e,finalFeed)>F[2]+BURP+10){
+      push({time:finalFeed,type:"feed",duration:F[fi]||20,feedIdx:fi,feedDur:F[fi]||20,note:"취침 전 마지막 수유!"});
+      push({time:addMin(finalFeed,F[fi]||20),type:"burp",duration:BURP,note:"트림 후 취침 준비"});
+    }
+  }
+  push({time:bedtime,type:"night",note:`야간 취침 ${fmt(bedtime)} — 오늘도 수고했어요 💕`});
+  return items.sort((a,b)=>toMin(a.time)-toMin(b.time));
+}
+
+function DayRecord({record,onDelete}){
+  const[open,setOpen]=useState(false);
+  const naps=record.napDurs;
+  const totalFeed=record.feedAmounts?Object.values(record.feedAmounts).reduce((a,b)=>a+(b||0),0):0;
+  const feedCount=record.feedAmounts?Object.values(record.feedAmounts).filter(v=>v>0).length:0;
+  return(
+    <div style={{background:"white",borderRadius:"14px",overflow:"hidden",marginBottom:"10px",border:"1px solid #F0E6FF",boxShadow:"0 2px 10px rgba(149,117,205,0.08)"}}>
+      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",cursor:"pointer",background:open?"linear-gradient(135deg,#F3E5F5,#EDE7F6)":"white"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"10px",minWidth:0,flex:1}}>
+          <div style={{width:"38px",height:"38px",borderRadius:"10px",background:"linear-gradient(135deg,#CE93D8,#9575CD)",display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontWeight:"900",fontSize:"12px",flexShrink:0}}>
+            {record.date.split("-")[2]}일
+          </div>
+          <div style={{minWidth:0,flex:1}}>
+            <div style={{fontSize:"12px",fontWeight:"700",color:"#37474F"}}>{fmtDate(record.date)}</div>
+            <div style={{display:"flex",gap:"5px",marginTop:"3px",flexWrap:"wrap"}}>
+              <span style={{fontSize:"10px",color:"#9575CD",background:"#EDE7F6",borderRadius:"5px",padding:"1px 5px",flexShrink:0}}>☀️ {fmt(record.wakeTime)}</span>
+              {[1,2,3].map(n=>naps[n]?(
+                <span key={n} style={{fontSize:"10px",color:"#9575CD",background:"#EDE7F6",borderRadius:"5px",padding:"1px 5px",flexShrink:0}}>😴{n} {naps[n]}분</span>
+              ):null)}
+              {totalFeed>0&&<span style={{fontSize:"10px",color:"#2E7D32",background:"#E8F5E9",borderRadius:"5px",padding:"1px 5px",flexShrink:0}}>🍼 {totalFeed}ml</span>}
+            </div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:"8px",flexShrink:0}}>
+          {record.memo&&<span style={{fontSize:"11px",color:"#AB47BC"}}>📝</span>}
+          <span style={{color:"#9575CD",fontSize:"12px"}}>{open?"▲":"▼"}</span>
+        </div>
+      </div>
+      {open&&(
+        <div style={{padding:"12px 14px",borderTop:"1px solid #F0E6FF"}}>
+          <div style={{display:"flex",gap:"6px",marginBottom:"10px",flexWrap:"wrap"}}>
+            {[1,2,3].map(n=>{
+              const ns=record.napStarts&&record.napStarts[n];
+              const ne=ns?addMin(ns,record.napDurs[n]):null;
+              return ns?(
+                <div key={n} style={{background:"#F3E5F5",borderRadius:"9px",padding:"6px 10px",fontSize:"11px",color:"#6A1B9A",border:"1px solid #CE93D8"}}>
+                  <div style={{fontWeight:"700",marginBottom:"2px"}}>😴 {n}번째 낮잠</div>
+                  <div>{fmt(ns)} ~ {fmt(ne)}</div>
+                  <div style={{color:"#9575CD",marginTop:"1px"}}>{record.napDurs[n]}분</div>
+                </div>
+              ):null;
+            })}
+          </div>
+          {record.feedAmounts&&feedCount>0&&(
+            <div style={{marginBottom:"10px",background:"#F1F8E9",borderRadius:"10px",padding:"10px 12px",border:"1px solid #C5E1A5"}}>
+              <div style={{fontSize:"11px",fontWeight:"700",color:"#388E3C",marginBottom:"7px"}}>🍼 수유량 기록</div>
+              <div style={{display:"flex",gap:"5px",flexWrap:"wrap",marginBottom:"6px"}}>
+                {Object.entries(record.feedAmounts).filter(([,v])=>v>0).map(([idx,ml])=>(
+                  <div key={idx} style={{background:"white",border:"1px solid #A5D6A7",borderRadius:"7px",padding:"3px 8px",fontSize:"11px",color:"#2E7D32",fontWeight:"600"}}>
+                    {Number(idx)+1}번 {ml}ml
+                  </div>
+                ))}
+              </div>
+              <div style={{fontSize:"11px",fontWeight:"700",color:"#1B5E20",borderTop:"1px solid #C5E1A5",paddingTop:"6px"}}>총 {totalFeed}ml · {feedCount}회</div>
+            </div>
+          )}
+          {record.memo&&(
+            <div style={{background:"#FFFDE7",borderRadius:"8px",padding:"8px 10px",fontSize:"11px",color:"#F57F17",border:"1px solid #FFF176",marginBottom:"8px"}}>📝 {record.memo}</div>
+          )}
+          <button onClick={()=>onDelete(record.date)} style={{fontSize:"11px",color:"#EF9A9A",background:"none",border:"1px solid #EF9A9A",borderRadius:"7px",padding:"4px 10px",cursor:"pointer",fontFamily:"inherit"}}>🗑 기록 삭제</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function App(){
+  const[age,setAge]=useState(3);
+  const[wakeTime,setWakeTime]=useState("07:00");
+  const[lastNapFixed,setLastNapFixed]=useState("17:00");
+  const[bedtimeOffset,setBedtimeOffset]=useState(13);
+  const[generated,setGenerated]=useState(false);
+  const[tab,setTab]=useState("schedule");
+  const[feedDurs,setFeedDurs]=useState({0:20,1:20,2:20,3:20,4:20});
+  const[feedAmounts,setFeedAmounts]=useState({0:0,1:0,2:0,3:0,4:0});
+  const[napStarts,setNapStarts]=useState({1:null,2:null,3:null});
+  const[napDurs,setNapDurs]=useState({1:80,2:80,3:40});
+  const[wishSlots,setWishSlots]=useState([
+    {napNum:1,from:"",to:"",active:false},
+    {napNum:2,from:"",to:"",active:false},
+    {napNum:3,from:"",to:"",active:false},
+  ]);
+  const[diary,setDiary]=useState({});
+  const[diaryLoaded,setDiaryLoaded]=useState(false);
+  const[savingDate,setSavingDate]=useState(todayStr());
+  const[memo,setMemo]=useState("");
+  const[saveMsg,setSaveMsg]=useState("");
+  const[babyName,setBabyName]=useState("");
+  const[nameInput,setNameInput]=useState("");
+  const[showIntro,setShowIntro]=useState(true);
+
+  const ww=WAKE_WINDOWS[age];
+  const midWW=Math.round((ww.min+ww.max)/2);
+  const twoNapMode=!!ww.naps&&ww.naps===2;
+
+  useEffect(()=>{
+    const r=store.get("baby-diary");
+    if(r&&r.value)try{setDiary(JSON.parse(r.value));}catch{}
+    const nr=store.get("baby-name");
+    if(nr&&nr.value){setBabyName(nr.value);setNameInput(nr.value);setShowIntro(false);}
+    setDiaryLoaded(true);
+  },[]);
+
+  const saveDiary=useCallback((d)=>{store.set("baby-diary",JSON.stringify(d));},[]);
+  const handleNameSubmit=()=>{
+    const name=nameInput.trim();
+    if(!name)return;
+    setBabyName(name);setShowIntro(false);
+    store.set("baby-name",name);
+  };
+
+  const handleFeedChange=(idx,val)=>setFeedDurs(p=>({...p,[idx]:val}));
+  const handleFeedAmountChange=(idx,val)=>setFeedAmounts(p=>({...p,[idx]:val}));
+  const handleNapStartChange=(n,t)=>setNapStarts(p=>({...p,[n]:t}));
+  const handleNapDurChange=(n,val)=>setNapDurs(p=>({...p,[n]:val}));
+  const handleWishChange=(napNum,field,val)=>setWishSlots(prev=>prev.map(s=>s.napNum===napNum?{...s,[field]:val}:s));
+  const toggleWish=(napNum)=>{
+    setWishSlots(prev=>{
+      const next=prev.map(s=>{
+        if(s.napNum!==napNum)return s;
+        const nowActive=!s.active;
+        if(nowActive&&s.from&&s.to){
+          if(napNum===1||napNum===2){const st=fromMin(toMin(s.from)-napDurs[napNum]);setNapStarts(p=>({...p,[napNum]:st}));}
+          if(napNum===1)setNapStarts(p=>({...p,2:s.to||p[2]}));
+          if(napNum===2)setNapStarts(p=>({...p,3:s.to||p[3]}));
+          if(napNum===3)setNapStarts(p=>({...p,3:s.from||p[3]}));
+        }
+        if(!nowActive)setNapStarts(p=>({...p,[napNum]:null}));
+        return{...s,active:nowActive};
+      });
+      return next;
+    });
+  };
+
+  const schedule=generated?buildSchedule({wakeTime,feedDurs,napStarts,napDurs,lastNapFixed,midWW,ww,bedtimeOffset,twoNapMode}):[];
+  const saveToday=()=>{
+    const record={date:savingDate,age,wakeTime,lastNapFixed,bedtimeOffset,
+      feedDurs:{...feedDurs},feedAmounts:{...feedAmounts},
+      napStarts:{...napStarts},napDurs:{...napDurs},memo,savedAt:new Date().toISOString()};
+    const next={...diary,[savingDate]:record};
+    setDiary(next);saveDiary(next);
+    setSaveMsg("✅ 저장됐어요!");setTimeout(()=>setSaveMsg(""),2500);
+  };
+  const deleteRecord=(date)=>{const next={...diary};delete next[date];setDiary(next);saveDiary(next);};
+  const sortedDates=Object.keys(diary).sort((a,b)=>b.localeCompare(a));
+  const todayTotal=Object.values(feedAmounts).reduce((a,b)=>a+(b||0),0);
+  const todayCount=Object.values(feedAmounts).filter(v=>v>0).length;
+
+  const TabBtn=({id,icon,label})=>(
+    <button onClick={()=>setTab(id)} style={{flex:1,padding:"10px 0",background:tab===id?"linear-gradient(135deg,#9575CD,#7B1FA2)":"rgba(237,231,246,0.6)",color:tab===id?"white":"#7B1FA2",border:"none",borderRadius:"12px",fontWeight:"700",fontSize:"12px",cursor:"pointer",fontFamily:"inherit",boxShadow:tab===id?"0 2px 8px rgba(123,31,162,0.3)":"none"}}>
+      {icon} {label}
+    </button>
+  );
+
+  if(showIntro){
+    return(
+      <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#FFF0F5 0%,#FFE4EC 40%,#F3E5F5 75%,#E8EAF6 100%)",fontFamily:"'Noto Sans KR',sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"30px 24px",overflowX:"hidden"}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,pointerEvents:"none",overflow:"hidden"}}>
+          {["10%","25%","45%","60%","75%","88%","33%","55%"].map((left,i)=>(
+            <div key={i} style={{position:"absolute",left,top:`${10+i*11}%`,fontSize:["14px","10px","12px","16px","10px","13px","11px","15px"][i],animation:`shimmer ${2+i*0.3}s ease-in-out infinite`,animationDelay:`${i*0.4}s`}}>
+              {["✨","🌟","💫","⭐","✨","🌟","💫","⭐"][i]}
+            </div>
+          ))}
+        </div>
+        <div style={{width:"100%",maxWidth:"360px",animation:"floatUp 0.7s ease forwards"}}>
+          <div style={{textAlign:"center",marginBottom:"28px"}}>
+            <div style={{fontSize:"72px",animation:"heartbeat 2s ease-in-out infinite",display:"inline-block",filter:"drop-shadow(0 4px 12px rgba(233,30,99,0.25))"}}>👶</div>
+          </div>
+          <div style={{textAlign:"center",marginBottom:"32px"}}>
+            <h1 style={{fontSize:"26px",fontWeight:"900",color:"#4A148C",margin:"0 0 14px",lineHeight:"1.35",letterSpacing:"-0.5px"}}>
+              세상에서 가장<br/>소중한 아이가<br/>태어났군요 🌸
+            </h1>
+            <p style={{fontSize:"14px",color:"#9575CD",lineHeight:"1.9",margin:"0 0 8px",fontWeight:"500"}}>
+              매일 밤 지치고 힘들어도<br/>
+              그 작은 숨소리 하나에<br/>
+              다시 힘이 나는 걸 알아요.
+            </p>
+            <p style={{fontSize:"13px",color:"#BA68C8",lineHeight:"1.8",margin:0}}>
+              우리 아이 이름을 알려주세요.<br/>
+              오늘 하루도 함께 잘 해낼 수 있어요 💕
+            </p>
+          </div>
+          <div style={{background:"rgba(255,255,255,0.85)",backdropFilter:"blur(12px)",borderRadius:"20px",padding:"24px 20px 28px",boxShadow:"0 8px 32px rgba(149,117,205,0.18)",marginBottom:"20px"}}>
+            <label style={{display:"block",fontSize:"12px",fontWeight:"700",color:"#CE93D8",textAlign:"center",marginBottom:"16px",letterSpacing:"1px"}}>✨ 아이 이름</label>
+            <input className="intro-input" placeholder="이름을 입력해주세요"
+              value={nameInput} onChange={e=>setNameInput(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&handleNameSubmit()} autoFocus/>
+            {nameInput.trim()&&(
+              <div style={{textAlign:"center",marginTop:"14px",fontSize:"13px",color:"#9575CD",fontWeight:"600",animation:"floatUp 0.3s ease forwards"}}>
+                반가워요, <strong style={{color:"#E91E63"}}>{nameInput.trim()}</strong> 맘/아빠! 💝
+              </div>
+            )}
+          </div>
+          <button className="intro-btn" onClick={handleNameSubmit}
+            style={{opacity:nameInput.trim()?1:0.45,pointerEvents:nameInput.trim()?"auto":"none"}}>
+            {nameInput.trim()?`${nameInput.trim()} 일정 시작하기 →`:"이름을 입력해주세요"}
+          </button>
+          <p style={{textAlign:"center",marginTop:"16px",fontSize:"11px",color:"#CE93D8"}}>이름은 이 기기에만 저장되고 외부로 전송되지 않아요 🔒</p>
+        </div>
+      </div>
+    );
+  }
+
+  return(
+    <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#FFF8F0 0%,#FFE8D6 35%,#F3E5F5 70%,#E8EAF6 100%)",fontFamily:"'Noto Sans KR',sans-serif",padding:"18px 15px 60px",overflowX:"hidden",width:"100%",maxWidth:"100vw",position:"relative"}}>
+      {/* 헤더 */}
+      <div style={{textAlign:"center",marginBottom:"14px"}}>
+        <div style={{fontSize:"34px",marginBottom:"4px"}}>👶</div>
+        <h1 style={{fontSize:"18px",fontWeight:"900",color:"#4A148C",margin:"0 0 2px"}}>{babyName?`${babyName} 하루 일정 계산기`:"신생아 하루 일정 계산기"}</h1>
+        <p style={{fontSize:"10px",color:"#9575CD",margin:0}}>먹🍼 → 트림🤲 → 놀🧸 → 잠😴 • 실시간 조정 • 일별 기록</p>
+        {babyName&&(
+          <button onClick={()=>setShowIntro(true)} style={{marginTop:"6px",fontSize:"10px",color:"#CE93D8",background:"none",border:"1px solid #E1BEE7",borderRadius:"20px",padding:"2px 10px",cursor:"pointer",fontFamily:"inherit"}}>✏️ 이름 변경</button>
+        )}
+      </div>
+
+      {/* 설정 카드 */}
+      <div className="card">
+        <h2 style={{fontSize:"13px",fontWeight:"700",color:"#4A148C",margin:"0 0 12px"}}>⚙️ 오늘의 설정</h2>
+        <div style={{marginBottom:"12px"}}>
+          <label style={{display:"block",fontSize:"11px",fontWeight:"700",color:"#546E7A",marginBottom:"6px"}}>👶 아기 월령</label>
+          <div style={{display:"flex",gap:"5px",flexWrap:"wrap"}}>
+            {Object.entries(WAKE_WINDOWS).map(([m,v])=>(
+              <button key={m} onClick={()=>setAge(Number(m))} style={{padding:"5px 10px",borderRadius:"18px",border:"none",background:age===Number(m)?"linear-gradient(135deg,#FF8A65,#FF5722)":"rgba(255,200,160,0.3)",color:age===Number(m)?"white":"#795548",fontWeight:age===Number(m)?"700":"500",fontSize:"11px",cursor:"pointer",fontFamily:"inherit"}}>{v.label}</button>
+            ))}
+          </div>
+          <div style={{marginTop:"6px",padding:"6px 10px",background:"rgba(255,183,77,0.12)",borderRadius:"8px",fontSize:"10px",color:"#795548"}}>
+            💡 권장 깨시 <strong>{ww.min}~{ww.max}분</strong>
+            {twoNapMode&&<span style={{marginLeft:"8px",color:"#FB8C00",fontWeight:"700"}}>· 낮잠 2번 시기 🌙</span>}
+          </div>
+        </div>
+
+        <div style={{marginBottom:"12px"}}>
+          <label style={{display:"block",fontSize:"11px",fontWeight:"700",color:"#546E7A",marginBottom:"5px"}}>☀️ 아침 기상 시간</label>
+          <div style={{position:"relative",overflow:"hidden",borderRadius:"10px",border:"2px solid #FFD0B5"}}>
+            <input type="time" value={wakeTime} onChange={e=>setWakeTime(e.target.value)}
+              style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",opacity:0,cursor:"pointer",zIndex:1,minWidth:0}}/>
+            <div style={{padding:"9px 12px",fontSize:"14px",color:"#37474F",background:"white",fontFamily:"inherit",pointerEvents:"none",fontWeight:"500"}}>{fmt(wakeTime)}</div>
+          </div>
+        </div>
+
+        {!twoNapMode&&<div style={{marginBottom:"14px"}}>
+          <label style={{display:"block",fontSize:"11px",fontWeight:"700",color:"#546E7A",marginBottom:"5px"}}>🌙 3번 낮잠 기본 시작 시간</label>
+          <div style={{position:"relative",overflow:"hidden",borderRadius:"10px",border:"2px solid #FFD0B5"}}>
+            <input type="time" value={lastNapFixed} onChange={e=>{setLastNapFixed(e.target.value);setNapStarts(p=>({...p,3:null}));setWishSlots(p=>p.map(s=>s.napNum===3?{...s,active:false}:s));}}
+              style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",opacity:0,cursor:"pointer",zIndex:1,minWidth:0}}/>
+            <div style={{padding:"9px 12px",fontSize:"14px",color:"#37474F",background:"white",fontFamily:"inherit",pointerEvents:"none",fontWeight:"500"}}>{fmt(lastNapFixed)}</div>
+          </div>
+          <div style={{fontSize:"10px",color:"#90A4AE",marginTop:"2px"}}>권장: 오후 5시 ~ 5시 30분</div>
+        </div>}
+
+        <div style={{marginBottom:"14px"}}>
+          <label style={{display:"block",fontSize:"11px",fontWeight:"700",color:"#546E7A",marginBottom:"6px"}}>
+            🌙 야간 취침 시간 &nbsp;
+            <span style={{color:"#5C6BC0",fontWeight:"900"}}>{fmt(addMin(wakeTime,bedtimeOffset*60))}</span>
+            <span style={{color:"#90A4AE",fontWeight:"400"}}> (기상 후 {bedtimeOffset}시간)</span>
+          </label>
+          <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+            <button onClick={()=>setBedtimeOffset(o=>Math.max(11,o-0.5))} style={{width:"30px",height:"30px",borderRadius:"50%",border:"1.5px solid #5C6BC0",background:"white",color:"#5C6BC0",fontWeight:"700",fontSize:"16px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>−</button>
+            <input type="range" min={11} max={14} step={0.5} value={bedtimeOffset} onChange={e=>setBedtimeOffset(Number(e.target.value))}
+              style={{flex:1,minWidth:0,height:"4px",borderRadius:"2px",outline:"none",cursor:"pointer",WebkitAppearance:"none",appearance:"none",border:"none",
+                background:`linear-gradient(to right,#5C6BC0 ${((bedtimeOffset-11)/(14-11))*100}%,#E0E0E0 0%)`}}/>
+            <button onClick={()=>setBedtimeOffset(o=>Math.min(14,o+0.5))} style={{width:"30px",height:"30px",borderRadius:"50%",border:"1.5px solid #5C6BC0",background:"white",color:"#5C6BC0",fontWeight:"700",fontSize:"16px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>+</button>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:"10px",color:"#90A4AE",marginTop:"3px"}}><span>11시간</span><span>14시간</span></div>
+          <div style={{marginTop:"6px",padding:"6px 10px",background:"linear-gradient(135deg,#E8EAF6,#EDE7F6)",borderRadius:"8px",fontSize:"10px",color:"#5C6BC0",fontWeight:"600",lineHeight:"1.7"}}>
+            💡 기상 <strong>{fmt(wakeTime)}</strong> → 취침 <strong>{fmt(addMin(wakeTime,bedtimeOffset*60))}</strong><br/>
+            🛁 목욕 <strong>{fmt(addMin(addMin(wakeTime,bedtimeOffset*60),-70))}</strong> · 🍼 막수 <strong>{fmt(addMin(addMin(wakeTime,bedtimeOffset*60),-20))}</strong>
+          </div>
+        </div>
+
+        <div style={{borderTop:"1px solid #F3E5F5",paddingTop:"12px",marginBottom:"14px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"6px",marginBottom:"6px"}}>
+            <span style={{fontSize:"14px"}}>📌</span>
+            <h3 style={{fontSize:"12px",fontWeight:"700",color:"#AD1457",margin:0}}>원하는 깨시 시간대 고정</h3>
+            <span style={{fontSize:"10px",color:"#90A4AE"}}>(선택사항)</span>
+          </div>
+          <p style={{fontSize:"10px",color:"#90A4AE",margin:"0 0 10px",lineHeight:"1.5"}}>입력 후 토글 ON → 낮잠 시간 자동 조정</p>
+          {wishSlots.filter(slot=>twoNapMode?slot.napNum<=2:true).map(slot=>{
+            const dur=slot.from&&slot.to?diffMin(slot.from,slot.to):0;
+            const ok=dur>=ww.min&&dur<=ww.max;
+            const warn=dur>0&&!ok;
+            const borderColor=slot.active?"#E91E63":slot.from&&slot.to?ok?"#66BB6A":"#FFA726":"#E0E0E0";
+            return(
+              <div key={slot.napNum} className="wish-row" style={{borderColor,background:slot.active?"#FFF0F5":"#FAFAFA",marginBottom:"8px"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}}>
+                  <span style={{fontSize:"12px",fontWeight:"700",color:"#9575CD"}}>😴 {slot.napNum}번 낮잠 후 깨시</span>
+                  <div style={{display:"flex",alignItems:"center",gap:"8px",flexShrink:0}}>
+                    {dur>0&&<span style={{fontSize:"10px",color:ok?"#43A047":warn?"#FB8C00":"#90A4AE",fontWeight:"700"}}>{dur}분 {ok?"✅":warn?"⚠️":""}</span>}
+                    <button onClick={()=>toggleWish(slot.napNum)} style={{flexShrink:0,width:"40px",height:"22px",borderRadius:"11px",border:"none",cursor:"pointer",background:slot.active?"#E91E63":"#E0E0E0",transition:"all 0.2s",position:"relative"}}>
+                      <div style={{position:"absolute",top:"3px",left:slot.active?"21px":"3px",width:"16px",height:"16px",borderRadius:"50%",background:"white",transition:"all 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+                    </button>
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"flex-end",gap:"6px"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:"10px",color:"#90A4AE",marginBottom:"3px"}}>시작</div>
+                    <div style={{position:"relative",overflow:"hidden",borderRadius:"8px",border:`1.5px solid ${borderColor}`}}>
+                      <input type="time" value={slot.from} onChange={e=>handleWishChange(slot.napNum,"from",e.target.value)}
+                        style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",opacity:0,cursor:"pointer",zIndex:1}}/>
+                      <div style={{padding:"7px 8px",fontSize:"12px",color:slot.from?"#37474F":"#BDBDBD",background:"white",pointerEvents:"none"}}>{slot.from?fmt(slot.from):"시작 시간"}</div>
+                    </div>
+                  </div>
+                  <span style={{color:"#BDBDBD",fontSize:"13px",flexShrink:0,paddingBottom:"6px"}}>~</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:"10px",color:"#90A4AE",marginBottom:"3px"}}>종료</div>
+                    <div style={{position:"relative",overflow:"hidden",borderRadius:"8px",border:`1.5px solid ${borderColor}`}}>
+                      <input type="time" value={slot.to} onChange={e=>handleWishChange(slot.napNum,"to",e.target.value)}
+                        style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",opacity:0,cursor:"pointer",zIndex:1}}/>
+                      <div style={{padding:"7px 8px",fontSize:"12px",color:slot.to?"#37474F":"#BDBDBD",background:"white",pointerEvents:"none"}}>{slot.to?fmt(slot.to):"종료 시간"}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <button onClick={()=>{setGenerated(true);setTab("schedule");}} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#FF8A65,#FF5722)",color:"white",border:"none",borderRadius:"13px",fontSize:"14px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(255,87,34,0.35)"}}>
+          🍼 하루 일정 만들기
+        </button>
+      </div>
+
+      {generated&&(
+        <div style={{display:"flex",gap:"7px",marginBottom:"12px"}}>
+          <TabBtn id="schedule" icon="📅" label="하루 일정"/>
+          <TabBtn id="diary" icon="📓" label={`기록 ${sortedDates.length}일`}/>
+        </div>
+      )}
+
+      {generated&&tab==="schedule"&&(
+        <div className="card" style={{animationDelay:"0.05s"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}}>
+            <h2 style={{fontSize:"13px",fontWeight:"700",color:"#4A148C",margin:0}}>📅 오늘의 하루 일정</h2>
+            <span style={{fontSize:"10px",color:"#90A4AE"}}>수유·낮잠 탭 → 수정</span>
+          </div>
+          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",marginBottom:"8px",padding:"8px 10px",background:"linear-gradient(135deg,#F3E5F5,#EDE7F6)",borderRadius:"10px",border:"1px solid #CE93D8"}}>
+            {(twoNapMode?[1,2]:[1,2,3]).map(n=>{
+              const autoStart=n===1?addMin(wakeTime,midWW):n===2?addMin(addMin(napStarts[1]||addMin(wakeTime,midWW),napDurs[1]),midWW):lastNapFixed;
+              const start=napStarts[n]||(n===3?lastNapFixed:autoStart);
+              return(
+                <div key={n} style={{display:"flex",alignItems:"center",gap:"3px",fontSize:"10px",color:"#4A148C",fontWeight:"600",background:"white",borderRadius:"7px",padding:"3px 7px",border:!!napStarts[n]?"1.5px solid #9575CD":"1px solid #CE93D8",flexShrink:0}}>
+                  😴{n}번 {!!napStarts[n]&&<span style={{fontSize:"9px",color:"#E91E63"}}>📌</span>}
+                  <span style={{color:"#9575CD",fontWeight:"800"}}>{fmt(start)}</span>
+                  <span style={{color:"#BDBDBD"}}>·</span>
+                  <span style={{color:"#7B1FA2"}}>{napDurs[n]}분</span>
+                </div>
+              );
+            })}
+            {twoNapMode&&<div style={{fontSize:"10px",color:"#FB8C00",background:"#FFF3E0",borderRadius:"7px",padding:"3px 7px",border:"1px solid #FFCC02",flexShrink:0}}>💡 2낮잠 모드</div>}
+          </div>
+          {todayTotal>0&&(
+            <div style={{display:"flex",alignItems:"center",gap:"8px",padding:"7px 10px",background:"#F1F8E9",borderRadius:"10px",border:"1px solid #C5E1A5",marginBottom:"8px"}}>
+              <span style={{fontSize:"12px"}}>🍼</span>
+              <span style={{fontSize:"11px",color:"#2E7D32",fontWeight:"700"}}>오늘 총 수유량 {todayTotal}ml ({todayCount}회 기록)</span>
+            </div>
+          )}
+          <div style={{display:"flex",gap:"4px",flexWrap:"wrap",marginBottom:"10px"}}>
+            {[{icon:"🍼",label:"수유",color:"#66BB6A"},{icon:"🤲",label:"트림",color:"#FFA726"},{icon:"🧸",label:"놀이",color:"#42A5F5"},{icon:"😴",label:"낮잠",color:"#9575CD"},{icon:"🛁",label:"목욕",color:"#26C6DA"}].map(b=>(
+              <div key={b.label} style={{display:"flex",alignItems:"center",gap:"2px",padding:"2px 6px",borderRadius:"20px",background:`${b.color}15`,border:`1px solid ${b.color}40`,fontSize:"10px",color:"#546E7A",fontWeight:"600"}}>{b.icon} {b.label}</div>
+            ))}
+          </div>
+          {schedule.map((item,i)=>(
+            <TimeBlock key={i} item={item} index={i} isLast={i===schedule.length-1}
+              onFeedChange={handleFeedChange} onNapStartChange={handleNapStartChange} onNapDurChange={handleNapDurChange}
+              onFeedAmountChange={handleFeedAmountChange} feedAmounts={feedAmounts}/>
+          ))}
+          <div style={{borderTop:"1px solid #F3E5F5",paddingTop:"12px",marginTop:"12px"}}>
+            <h3 style={{fontSize:"12px",fontWeight:"700",color:"#4A148C",margin:"0 0 8px"}}>📓 오늘 기록 저장</h3>
+            <div style={{marginBottom:"8px"}}>
+              <label style={{fontSize:"11px",fontWeight:"600",color:"#546E7A",display:"block",marginBottom:"4px"}}>날짜</label>
+              <div style={{position:"relative",overflow:"hidden",borderRadius:"10px",border:"2px solid #E1BEE7"}}>
+                <input type="date" value={savingDate} onChange={e=>setSavingDate(e.target.value)}
+                  style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",opacity:0,cursor:"pointer",zIndex:1,minWidth:0}}/>
+                <div style={{padding:"9px 12px",fontSize:"14px",color:"#37474F",background:"white",fontFamily:"inherit",pointerEvents:"none",fontWeight:"500"}}>
+                  {savingDate?savingDate.replace(/-/g,". "):"날짜 선택"}
+                </div>
+              </div>
+            </div>
+            <div style={{marginBottom:"10px"}}>
+              <label style={{fontSize:"11px",fontWeight:"600",color:"#546E7A",display:"block",marginBottom:"4px"}}>메모 (선택)</label>
+              <textarea rows={2} value={memo} onChange={e=>setMemo(e.target.value)} placeholder="오늘의 특이사항, 컨디션 등을 기록해요..."/>
+            </div>
+            {todayTotal>0&&(
+              <div style={{marginBottom:"10px",padding:"8px 10px",background:"#F1F8E9",borderRadius:"8px",fontSize:"11px",color:"#388E3C",border:"1px solid #C5E1A5"}}>
+                💧 수유량 포함 저장: 총 <strong>{todayTotal}ml</strong> ({todayCount}회)
+              </div>
+            )}
+            <button onClick={saveToday} style={{width:"100%",padding:"11px",background:"linear-gradient(135deg,#CE93D8,#9575CD)",color:"white",border:"none",borderRadius:"12px",fontSize:"13px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit",boxShadow:"0 3px 12px rgba(149,117,205,0.35)"}}>
+              📓 이 일정 저장하기
+            </button>
+            {saveMsg&&<div style={{textAlign:"center",marginTop:"7px",fontSize:"12px",color:"#7B1FA2",fontWeight:"700",animation:"pop 0.3s ease"}}>{saveMsg}</div>}
+          </div>
+          <button onClick={()=>{setNapStarts({1:null,2:null,3:null});setWishSlots(p=>p.map(s=>({...s,active:false})));setFeedAmounts({0:0,1:0,2:0,3:0,4:0});}} style={{width:"100%",marginTop:"8px",padding:"8px",borderRadius:"10px",border:"1.5px solid #CE93D8",background:"white",color:"#9575CD",fontSize:"11px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit"}}>
+            🔄 모든 조정 초기화
+          </button>
+        </div>
+      )}
+
+      {generated&&tab==="diary"&&(
+        <div className="card" style={{animationDelay:"0.05s"}}>
+          <h2 style={{fontSize:"13px",fontWeight:"700",color:"#4A148C",margin:"0 0 12px"}}>📓 일별 기록</h2>
+          {!diaryLoaded&&<div style={{textAlign:"center",padding:"20px",color:"#9575CD",fontSize:"12px"}}>불러오는 중...</div>}
+          {diaryLoaded&&sortedDates.length===0&&(
+            <div style={{textAlign:"center",padding:"24px 16px",color:"#CE93D8"}}>
+              <div style={{fontSize:"32px",marginBottom:"8px"}}>📭</div>
+              <div style={{fontSize:"13px",fontWeight:"600"}}>아직 저장된 기록이 없어요</div>
+              <div style={{fontSize:"11px",marginTop:"4px",color:"#BDBDBD"}}>일정 탭에서 오늘 기록을 저장해보세요!</div>
+            </div>
+          )}
+          {diaryLoaded&&sortedDates.length>0&&(
+            <>
+              <div style={{display:"flex",gap:"5px",flexWrap:"wrap",marginBottom:"14px"}}>
+                {sortedDates.slice(0,14).map(d=>(
+                  <div key={d} style={{background:"linear-gradient(135deg,#CE93D8,#9575CD)",color:"white",borderRadius:"8px",padding:"4px 8px",fontSize:"10px",fontWeight:"700"}}>{fmtDateShort(d)}</div>
+                ))}
+                {sortedDates.length>14&&<div style={{fontSize:"10px",color:"#9575CD",display:"flex",alignItems:"center"}}>+{sortedDates.length-14}일</div>}
+              </div>
+              {sortedDates.map(d=>(
+                <DayRecord key={d} record={diary[d]} onDelete={deleteRecord}/>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
