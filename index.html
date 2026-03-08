@@ -331,6 +331,7 @@ function App(){
   const[babyName,setBabyName]=useState("");
   const[nameInput,setNameInput]=useState("");
   const[showIntro,setShowIntro]=useState(true);
+  const[confirmReset,setConfirmReset]=useState(false);
 
   const ww=WAKE_WINDOWS[age];
   const midWW=Math.round((ww.min+ww.max)/2);
@@ -390,7 +391,7 @@ function App(){
   const todayCount=Object.values(feedAmounts).filter(v=>v>0).length;
 
   const TabBtn=({id,icon,label})=>(
-    <button onClick={()=>setTab(id)} style={{flex:1,padding:"10px 0",background:tab===id?"linear-gradient(135deg,#9575CD,#7B1FA2)":"rgba(237,231,246,0.6)",color:tab===id?"white":"#7B1FA2",border:"none",borderRadius:"12px",fontWeight:"700",fontSize:"12px",cursor:"pointer",fontFamily:"inherit",boxShadow:tab===id?"0 2px 8px rgba(123,31,162,0.3)":"none"}}>
+    <button onClick={()=>setTab(id)} style={{flex:1,padding:"10px 0",background:tab===id?"linear-gradient(135deg,#9575CD,#7B1FA2)":"rgba(237,231,246,0.6)",color:tab===id?"white":"#7B1FA2",border:"none",borderRadius:"12px",fontWeight:"700",fontSize:"11px",cursor:"pointer",fontFamily:"inherit",boxShadow:tab===id?"0 2px 8px rgba(123,31,162,0.3)":"none",whiteSpace:"nowrap"}}>
       {icon} {label}
     </button>
   );
@@ -563,14 +564,13 @@ function App(){
         </button>
       </div>
 
-      {generated&&(
-        <div style={{display:"flex",gap:"7px",marginBottom:"12px"}}>
-          <TabBtn id="schedule" icon="📅" label="하루 일정"/>
-          <TabBtn id="diary" icon="📓" label={`기록 ${sortedDates.length}일`}/>
-        </div>
-      )}
+      <div style={{display:"flex",gap:"7px",marginBottom:"12px"}}>
+        <TabBtn id="schedule" icon="📅" label="하루 일정"/>
+        <TabBtn id="diary" icon="📓" label={`기록 ${sortedDates.length}일`}/>
+        <TabBtn id="reset" icon="🔄" label="초기화"/>
+      </div>
 
-      {generated&&tab==="schedule"&&(
+      {tab==="schedule"&&(
         <div className="card" style={{animationDelay:"0.05s"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}}>
             <h2 style={{fontSize:"13px",fontWeight:"700",color:"#4A148C",margin:0}}>📅 오늘의 하루 일정</h2>
@@ -639,7 +639,7 @@ function App(){
         </div>
       )}
 
-      {generated&&tab==="diary"&&(
+      {tab==="diary"&&(
         <div className="card" style={{animationDelay:"0.05s"}}>
           <h2 style={{fontSize:"13px",fontWeight:"700",color:"#4A148C",margin:"0 0 12px"}}>📓 일별 기록</h2>
           {!diaryLoaded&&<div style={{textAlign:"center",padding:"20px",color:"#9575CD",fontSize:"12px"}}>불러오는 중...</div>}
@@ -665,6 +665,80 @@ function App(){
           )}
         </div>
       )}
+      {tab==="reset"&&(
+        <div className="card" style={{animationDelay:"0.05s"}}>
+          <div style={{textAlign:"center",padding:"16px 8px"}}>
+            <div style={{fontSize:"48px",marginBottom:"12px"}}>🔄</div>
+            <h2 style={{fontSize:"16px",fontWeight:"900",color:"#4A148C",margin:"0 0 8px"}}>초기화</h2>
+            <p style={{fontSize:"13px",color:"#9575CD",lineHeight:"1.8",margin:"0 0 24px"}}>
+              저장된 모든 데이터를 삭제하고<br/>처음부터 다시 시작해요
+            </p>
+
+            <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+              <button onClick={()=>{
+                setNapStarts({1:null,2:null,3:null});
+                setWishSlots(p=>p.map(s=>({...s,active:false})));
+                setFeedAmounts({0:0,1:0,2:0,3:0,4:0});
+                setFeedDurs({0:20,1:20,2:20,3:20,4:20});
+                setGenerated(false);
+                setConfirmReset(false);
+                setTab("schedule");
+              }} style={{width:"100%",padding:"13px",background:"linear-gradient(135deg,#FFB74D,#FF8A65)",color:"white",border:"none",borderRadius:"13px",fontSize:"14px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(255,138,101,0.35)"}}>
+                📅 오늘 일정만 초기화
+              </button>
+
+              {!confirmReset?(
+                <button onClick={()=>setConfirmReset(true)}
+                  style={{width:"100%",padding:"13px",background:"white",color:"#E53935",border:"2px solid #EF9A9A",borderRadius:"13px",fontSize:"14px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit"}}>
+                  🗑 전체 초기화 (이름·기록 모두 삭제)
+                </button>
+              ):(
+                <div style={{background:"#FFF3F3",border:"2px solid #EF9A9A",borderRadius:"13px",padding:"16px"}}>
+                  <p style={{fontSize:"13px",color:"#C62828",fontWeight:"700",margin:"0 0 12px",lineHeight:"1.6"}}>
+                    ⚠️ 정말 삭제할까요?<br/>
+                    <span style={{fontSize:"11px",fontWeight:"400",color:"#E57373"}}>이름, 모든 기록, 설정이 삭제되고<br/>복구가 불가능해요</span>
+                  </p>
+                  <div style={{display:"flex",gap:"8px"}}>
+                    <button onClick={()=>setConfirmReset(false)}
+                      style={{flex:1,padding:"11px",background:"white",color:"#9575CD",border:"1.5px solid #CE93D8",borderRadius:"10px",fontSize:"13px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit"}}>
+                      취소
+                    </button>
+                    <button onClick={()=>{
+                      try{localStorage.removeItem("baby-diary");}catch(e){}
+                      try{localStorage.removeItem("baby-name");}catch(e){}
+                      setDiary({});
+                      setBabyName("");
+                      setNameInput("");
+                      setNapStarts({1:null,2:null,3:null});
+                      setWishSlots([
+                        {napNum:1,from:"",to:"",active:false},
+                        {napNum:2,from:"",to:"",active:false},
+                        {napNum:3,from:"",to:"",active:false},
+                      ]);
+                      setFeedAmounts({0:0,1:0,2:0,3:0,4:0});
+                      setFeedDurs({0:20,1:20,2:20,3:20,4:20});
+                      setAge(3);
+                      setWakeTime("07:00");
+                      setLastNapFixed("17:00");
+                      setBedtimeOffset(13);
+                      setGenerated(false);
+                      setMemo("");
+                      setConfirmReset(false);
+                      setTab("schedule");
+                      setTimeout(()=>setShowIntro(true),50);
+                    }} style={{flex:1,padding:"11px",background:"linear-gradient(135deg,#EF9A9A,#E53935)",color:"white",border:"none",borderRadius:"10px",fontSize:"13px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit"}}>
+                      삭제할게요
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <p style={{fontSize:"10px",color:"#BDBDBD",marginTop:"16px"}}>전체 초기화 시 복구가 불가능해요</p>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
